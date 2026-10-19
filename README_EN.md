@@ -46,6 +46,8 @@ Integrity check after 60,000 redirects: `/metrics` redirect counter and the `cli
 
 Micro-benchmarks (`python bench/micro.py`): `bloom.contains` 260k ops/s (3.84 µs) · `base62` 786k ops/s (1.27 µs) · `lru.get` 1.21M ops/s (0.83 µs) · `ratelimit.check` 1.05M ops/s (0.95 µs).
 
+CI baseline on a GitHub Actions 2-core runner (pure-Python httpx load client, which is far heavier than `ab`): 433 QPS, P50 48.7 ms, P95 207.5 ms, P99 300.3 ms, 0% errors at 32 concurrency. Same command on a local 2 vCPU box gives 1122 QPS — numbers are meaningless without the box and the tool, which is why every figure here is labelled.
+
 ## Quick start
 
 ```bash
