@@ -29,7 +29,12 @@ def test_batch_flush_aggregates_counters(tmp_path):
 
 
 def test_batch_threshold_wakes_flusher_thread(tmp_path):
-    """队列攒满一个批次时立刻叫醒刷盘线程，而不是干等 flush_interval。"""
+    """队列攒满一个批次时立刻叫醒刷盘线程，而不是干等 flush_interval（默认 30s）。
+
+    注意：pending() 归零 与 flushes 计数自增不是同一个时刻——队列在真正落盘前就被清空了。
+    所以这里必须对计数器做带超时的等待，不能"看到队列空了就断言刷盘次数"。CI 上就是这个
+    竞态导致过偶发失败，修法是把两段状态各自等到位。
+    """
     cfg = Config(db_path=str(tmp_path / "b2.db"))
     init_db(cfg)
     buf = ClickBuffer(cfg.db_path, batch_size=3, flush_interval=30)
@@ -37,11 +42,16 @@ def test_batch_threshold_wakes_flusher_thread(tmp_path):
     try:
         for i in range(3):
             buf.submit("abc", None, None, None, ts=1000 + i)
-        deadline = time.time() + 2
-        while buf.pending() and time.time() < deadline:
+
+        deadline = time.time() + 5
+        while buf.stats()["flushes"] < 1 and time.time() < deadline:
             time.sleep(0.01)
+
+        assert buf.stats()["flushes"] >= 1, "批次阈值没有叫醒刷盘线程"
         assert buf.pending() == 0
-        assert buf.stats()["flushes"] >= 1
+        with readonly(cfg) as conn:
+            n = conn.execute("SELECT count(*) n FROM clicks WHERE code = 'abc'").fetchone()["n"]
+        assert n == 3
     finally:
         buf.stop()
 
