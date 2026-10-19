@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>shrinkr · 自托管短链</title>
+  <style>
+    :root { --bg:#0f1115; --card:#181b22; --fg:#e8eaed; --dim:#9aa0a6; --accent:#4c8dff; }
+    * { box-sizing: border-box; }
+    body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+           background:var(--bg); color:var(--fg); font:15px/1.6 -apple-system,"Segoe UI",Roboto,"Noto Sans SC",sans-serif; }
+    .card { width:min(680px,92vw); background:var(--card); border:1px solid #262a33; border-radius:14px; padding:28px; }
+    h1 { margin:0 0 4px; font-size:22px; }
+    p.sub { margin:0 0 20px; color:var(--dim); font-size:13px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+    input, button { font:inherit; border-radius:10px; border:1px solid #2c313b; padding:10px 12px; }
+    input { flex:1 1 260px; background:#11141a; color:var(--fg); }
+    input:focus { outline:none; border-color:var(--accent); }
+    button { background:var(--accent); border-color:var(--accent); color:#08111f; font-weight:600; cursor:pointer; }
+    button.ghost { background:transparent; color:var(--fg); border-color:#2c313b; }
+    .adv { margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; }
+    .adv input { flex:1 1 140px; }
+    .out { margin-top:20px; padding:14px; border-radius:10px; background:#11141a; border:1px solid #262a33;
+           display:none; word-break:break-all; }
+    .out.show { display:block; }
+    .out a { color:var(--accent); }
+    .err { color:#ff7a7a; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; font-size:13px; }
+    th, td { text-align:left; padding:6px 4px; border-bottom:1px solid #23272f; color:var(--dim); }
+    td:last-child, th:last-child { text-align:right; }
+    .meta { margin-top:8px; color:var(--dim); font-size:12px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>shrinkr</h1>
+    <p class="sub">自托管短链服务 · 布隆过滤器 + LRU + 滑动窗口限流 · MIT</p>
+
+    <form id="f">
+      <div class="row">
+        <input id="url" placeholder="https://example.com/very/long/link?with=query" required />
+        <button type="submit">生成短链</button>
+      </div>
+      <div class="adv">
+        <input id="code" placeholder="自定义短码（可选）" />
+        <input id="ttl" type="number" min="0" placeholder="有效期秒（可选）" />
+      </div>
+    </form>
+
+    <section id="out" class="out"></section>
+    <div class="meta" id="meta"></div>
+  </main>
+
+  <script>
+    const f = document.getElementById('f');
+    const out = document.getElementById('out');
+    const meta = document.getElementById('meta');
+
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      out.className = 'out show';
+      out.textContent = '生成中…';
+      const body = { url: document.getElementById('url').value };
+      const code = document.getElementById('code').value.trim();
+      const ttl = document.getElementById('ttl').value.trim();
+      if (code) body.custom_code = code;
+      if (ttl) body.ttl_seconds = Number(ttl);
+
+      try {
+        const res = await fetch('/api/links', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        const data = await res.json();
+        if (!res.ok) { out.className = 'out show err'; out.textContent = data.detail || '请求失败'; return; }
+        out.className = 'out show';
+        out.innerHTML = '短链：<a href="' + data.short_url + '" target="_blank">' + data.short_url + '</a>' +
+          '<br>剩余额度：' + (res.headers.get('X-RateLimit-Remaining') ?? '-');
+        loadStats(data.code);
+      } catch (err) {
+        out.className = 'out show err';
+        out.textContent = String(err);
+      }
+    });
+
+    async function loadStats(code) {
+      const res = await fetch('/api/links/' + code + '/stats');
+      if (!res.ok) return;
+      const s = await res.json();
+      const rows = (s.top_referers || []).map(r => '<tr><td>' + r.referer + '</td><td>' + r.clicks + '</td></tr>').join('');
+      meta.innerHTML = '点击 ' + s.total_clicks + ' · 独立访客 ' + s.unique_visitors +
+        (rows ? '<table><tr><th>来源</th><th>次数</th></tr>' + rows + '</table>' : '');
+    }
+  </script>
+</body>
+</html>

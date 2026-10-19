@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest --cov=app --cov-report=term-missing --cov-fail-under=80
+      - name: Smoke test (boot server + hit endpoints)
+        run: |
+          uvicorn app.main:app --port 8000 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8000/healthz && break || sleep 1; done
+          code=$(curl -s -X POST http://127.0.0.1:8000/api/links -H 'Content-Type: application/json' -d '{"url":"https://example.com"}' | python -c "import sys,json;print(json.load(sys.stdin)['code'])")
+          curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/$code
+          curl -s http://127.0.0.1:8000/metrics | head -5
+      - name: Load test (read path)
+        run: python bench/loadtest.py --requests 3000 --concurrency 32
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t shrinkr:ci .
+      - run: docker run -d --name shrinkr -p 8000:8000 shrinkr:ci
+      - run: sleep 5 && curl -sf http://127.0.0.1:8000/healthz
